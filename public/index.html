@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chat del stream</title>
+<style>
+  :root {
+    --bg: #0f0f14; --panel: #1a1a24; --line: #2a2a38;
+    --text: #ececf1; --muted: #9a9ab0; --accent: #7c5cff; --danger: #ff5c7a; --ok: #3ddc84;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .hidden { display: none !important; }
+
+  /* Login */
+  #login { min-height: 100%; display: grid; place-items: center; padding: 16px; }
+  .card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 16px; }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button { padding: 12px 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 600; font-size: 16px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #loginForm button { width: 100%; margin-top: 18px; }
+  .error { color: var(--danger); font-size: 14px; min-height: 20px; margin-top: 10px; }
+
+  /* Chat */
+  #chat { height: 100%; display: flex; flex-direction: column; max-width: 720px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header .me { flex: 1; font-weight: 700; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); flex: none; }
+  .dot.off { background: var(--danger); }
+  .link { background: none; color: var(--muted); padding: 6px 8px; font-weight: 400; font-size: 14px; }
+  #online { padding: 8px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--c); color: var(--c); font-weight: 600; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .empty { margin: auto; color: var(--muted); text-align: center; font-size: 14px; }
+  .msg { max-width: 85%; align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 12px; padding: 8px 12px; overflow-wrap: anywhere; }
+  .msg.mine { align-self: flex-end; border-left-width: 1px; border-right: 4px solid var(--c); }
+  .msg .who { display: block; font-size: 12px; font-weight: 700; color: var(--c); }
+  .msg .time { font-size: 11px; color: var(--muted); margin-left: 6px; font-weight: 400; }
+  form#send { display: flex; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  form#send input { flex: 1; min-width: 0; }
+  .meta { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 16px 0; min-height: 22px; }
+  #status { color: var(--danger); }
+  #counter { color: var(--muted); margin-left: auto; }
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form id="loginForm" class="card" autocomplete="on">
+    <h1>Chat del stream</h1>
+    <p class="sub">Lo que escribas aparece sobre tu personaje en el directo.</p>
+    <label for="username">Usuario</label>
+    <input id="username" name="username" autocomplete="username" autocapitalize="none" required>
+    <label for="password">Contraseña</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="loginBtn">Entrar</button>
+    <div class="error" id="loginError" role="alert"></div>
+  </form>
+</section>
+
+<section id="chat" class="hidden">
+  <header>
+    <div class="me"><span class="dot" id="connDot"></span><span id="me"></span></div>
+    <button class="link" id="logoutBtn" type="button">Salir</button>
+  </header>
+  <div id="online"></div>
+  <div id="messages"><div class="empty" id="empty">Aún no hay mensajes. ¡Saluda!</div></div>
+  <div class="meta"><span id="status" role="status"></span><span id="counter"></span></div>
+  <form id="send" autocomplete="off">
+    <input id="text" placeholder="Escribe tu mensaje…" enterkeyhint="send" maxlength="200">
+    <button type="submit" id="sendBtn">Enviar</button>
+  </form>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (s) => document.querySelector(s);
+  let socket = null;
+  let me = null;
+  let maxLength = 200;
+
+  const store = {
+    get() { try { return localStorage.getItem('chatToken'); } catch { return null; } },
+    set(t) { try { localStorage.setItem('chatToken', t); } catch {} },
+    clear() { try { localStorage.removeItem('chatToken'); } catch {} },
+  };
+
+  function showLogin(msg) {
+    $('#chat').classList.add('hidden');
+    $('#login').classList.remove('hidden');
+    $('#loginError').textContent = msg || '';
+    $('#username').focus();
+  }
+  function showChat() {
+    $('#login').classList.add('hidden');
+    $('#chat').classList.remove('hidden');
+  }
+  function setStatus(text) { $('#status').textContent = text || ''; }
+  function setConnected(ok) { $('#connDot').classList.toggle('off', !ok); }
+
+  // ---------- Login ----------
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#loginBtn');
+    btn.disabled = true;
+    $('#loginError').textContent = '';
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: $('#username').value, password: $('#password').value }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'No se pudo iniciar sesión');
+      store.set(data.token);
+      $('#password').value = '';
+      connect(data.token);
+    } catch (err) {
+      $('#loginError').textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#logoutBtn').addEventListener('click', async () => {
+    const token = store.get();
+    store.clear();
+    if (socket) { socket.removeAllListeners(); socket.disconnect(); socket = null; }
+    try { await fetch('/api/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }); } catch {}
+    showLogin();
+  });
+
+  // ---------- Socket ----------
+  function connect(token) {
+    if (socket) { socket.removeAllListeners(); socket.disconnect(); }
+    socket = io({ auth: { token } });
+
+    socket.on('connect', () => { setConnected(true); setStatus(''); });
+    socket.on('connect_error', (err) => {
+      setConnected(false);
+      if (err.message === 'unauthorized') {
+        store.clear();
+        socket.disconnect();
+        showLogin(me ? 'Tu sesión expiró, vuelve a entrar.' : '');
+      } else {
+        setStatus('Sin conexión, reintentando…');
+      }
+    });
+    socket.on('disconnect', (reason) => {
+      setConnected(false);
+      if (reason === 'io server disconnect') {
+        store.clear();
+        showLogin('Tu sesión fue cerrada.');
+      } else {
+        setStatus('Conexión perdida, reconectando…');
+      }
+    });
+
+    socket.on('init', (d) => {
+      me = d.me;
+      maxLength = d.maxLength;
+      $('#text').maxLength = maxLength;
+      $('#me').textContent = me.displayName;
+      $('#me').style.color = me.color;
+      $('#messages').querySelectorAll('.msg').forEach((el) => el.remove());
+      d.history.forEach(addMessage);
+      renderOnline(d.online);
+      updateCounter();
+      showChat();
+      $('#text').focus();
+    });
+    socket.on('message', addMessage);
+    socket.on('presence', renderOnline);
+  }
+
+  // ---------- UI ----------
+  function addMessage(m) {
+    const box = $('#messages');
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    $('#empty').classList.add('hidden');
+
+    const el = document.createElement('div');
+    el.className = 'msg' + (me && m.username === me.username ? ' mine' : '');
+    el.style.setProperty('--c', m.color);
+
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = m.displayName;
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    who.appendChild(time);
+
+    el.appendChild(who);
+    el.appendChild(document.createTextNode(m.text)); // textContent: nunca HTML del usuario
+    box.appendChild(el);
+    if (nearBottom || el.classList.contains('mine')) box.scrollTop = box.scrollHeight;
+  }
+
+  function renderOnline(list) {
+    const box = $('#online');
+    box.textContent = 'En línea:';
+    list.forEach((u) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.setProperty('--c', u.color);
+      chip.textContent = u.displayName;
+      box.appendChild(chip);
+    });
+  }
+
+  function updateCounter() {
+    const n = $('#text').value.length;
+    $('#counter').textContent = n ? `${n}/${maxLength}` : '';
+  }
+
+  // ---------- Envío + "escribiendo…" ----------
+  let typing = false;
+  let typingTimer = null;
+  function stopTyping() {
+    clearTimeout(typingTimer);
+    if (typing && socket) socket.emit('typing', false);
+    typing = false;
+  }
+
+  $('#text').addEventListener('input', () => {
+    updateCounter();
+    if (!socket?.connected) return;
+    if (!$('#text').value.trim()) return stopTyping();
+    if (!typing) { typing = true; socket.emit('typing', true); }
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(stopTyping, 3000);
+  });
+
+  $('#send').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = $('#text');
+    const text = input.value.trim();
+    if (!text || !socket?.connected) return;
+    const btn = $('#sendBtn');
+    btn.disabled = true;
+    socket.timeout(5000).emit('message', text, (err, res) => {
+      btn.disabled = false;
+      if (err) setStatus('No se pudo enviar, intenta de nuevo');
+      else if (res?.error) setStatus(res.error);
+      else { input.value = ''; setStatus(''); updateCounter(); stopTyping(); }
+      input.focus();
+    });
+  });
+
+  // ---------- Inicio ----------
+  const saved = store.get();
+  if (saved) connect(saved); else showLogin();
+</script>
+</body>
+</html>

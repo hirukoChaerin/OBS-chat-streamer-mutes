@@ -1,0 +1,97 @@
+# Chat de compañeros para OBS
+
+Cada compañero entra con su usuario y contraseña desde el celular o PC, escribe, y su mensaje aparece como burbuja **encima de su personaje** en OBS. Cada personaje tiene su propio overlay, así que los mensajes nunca se mezclan.
+
+```
+Compañero (navegador) ──► Cloudflare Tunnel ──► tu PC :3000 ──► OBS (Fuente de navegador por personaje)
+```
+
+## 1. Arrancar
+
+### Con Node (24.22.1 LTS o superior)
+Requiere **Node 24.22.1+** (parche de seguridad del 21-oct-2026). `npm install` falla a propósito con versiones anteriores (`engine-strict` en `.npmrc`). Si usas nvm: `nvm install && nvm use` (lee `.nvmrc`).
+
+Stack: Express 5.3 + Socket.IO 4.8.4, sin otras dependencias.
+
+```bash
+npm install
+npm run add-user -- ana 1234 "Ana" "#ff4d6d"
+npm run add-user -- luis abcd "Luis" "#4dabff"
+npm start
+```
+
+### Con Docker
+```bash
+docker compose up -d --build
+docker compose exec app npm run add-user -- ana 1234 "Ana" "#ff4d6d"
+```
+La imagen usa `node:24.22.1-slim` (Debian bookworm, la build oficial con glibc), y el build falla si el Node de la imagen es menor a 24.22.1.
+
+Cuando salga un nuevo parche de Node 24, cambia el tag o usa la línea 24 y reconstruye:
+```bash
+docker compose build --pull --build-arg NODE_VERSION=24-slim
+```
+
+Los usuarios se guardan en `./data/users.json` (contraseñas con hash scrypt). El servidor recarga el archivo solo: no hace falta reiniciar al crear, cambiar o borrar usuarios.
+
+```bash
+npm run add-user -- --list
+npm run add-user -- --remove ana     # le cierra la sesión al instante
+npm run add-user -- ana nuevaClave   # cambiar contraseña (mantiene nombre y color)
+```
+
+## 2. Compartir con Cloudflare Tunnel
+
+Rápido (URL aleatoria `*.trycloudflare.com`, cambia en cada arranque):
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+Fijo (tu dominio): crea un túnel en Cloudflare Zero Trust → Networks → Tunnels, con el servicio `http://localhost:3000` (o `http://app:3000` si usas el servicio `tunnel` del `docker-compose.yml`). WebSockets funcionan sin configurar nada extra.
+
+Pásale a cada compañero la URL del túnel + su usuario y contraseña.
+
+## 3. Configurar OBS
+
+Por **cada personaje**:
+
+1. Agrega la imagen del personaje.
+2. Agrega una **Fuente → Navegador** encima de la imagen:
+   - URL: `http://localhost:3000/overlay?user=ana`
+   - Ancho `600`, Alto `400` (ajusta a tu escena)
+   - Deja el CSS personalizado que trae OBS por defecto (fondo transparente).
+   - Marca **"Actualizar navegador cuando la escena se active"**.
+3. Para acomodarla, usa temporalmente `...&demo=1`: muestra una burbuja fija. Muévela hasta que la colita apunte a la cabeza del personaje y luego quita `&demo=1`.
+4. Selecciona imagen + fuente de navegador → clic derecho → **Agrupar**, así se mueven juntos.
+
+La burbuja crece **hacia arriba** desde el borde inferior de la fuente, así que el borde inferior de la fuente debe quedar justo sobre la cabeza.
+
+### Parámetros del overlay
+
+| Parámetro | Default | Qué hace |
+|---|---|---|
+| `user` | `*` | Usuario(s): `ana`, `ana,luis` o `*` (todos) |
+| `duration` | `8` | Segundos que dura cada burbuja. `0` = no desaparece |
+| `max` | `3` | Burbujas apiladas como máximo |
+| `size` | `28` | Tamaño de letra (px) |
+| `width` | `520` | Ancho máximo de la burbuja (px) |
+| `align` | `center` | `left` / `right`: hacia dónde se alinea la burbuja y su colita |
+| `name` | `1` | `0` oculta el nombre dentro de la burbuja |
+| `typing` | `1` | `0` oculta los "…" mientras el compañero escribe |
+| `bg`, `fg` | `ffffff`, `14141c` | Color de fondo / texto en hex sin `#` |
+| `key` | — | Necesario solo si configuraste `OVERLAY_KEY` |
+| `demo` | — | `1` = burbuja fija de prueba |
+
+Ejemplo estilo oscuro, una sola burbuja que se queda: 
+`http://localhost:3000/overlay?user=luis&max=1&duration=0&bg=1a1a24&fg=ffffff&size=32`
+
+## 4. Seguridad
+
+- **Overlay protegido por defecto:** sin `OVERLAY_KEY`, el overlay solo funciona desde tu PC; quien entre por el túnel no puede conectarse a él (se detecta por la cabecera `cf-connecting-ip` que añade Cloudflare). Si necesitas abrirlo desde otro equipo, define `OVERLAY_KEY` y añade `&key=...` a la URL.
+- Nadie puede escribir a nombre de otro: el usuario sale de la sesión del servidor, no del navegador.
+- Los mensajes se insertan como texto, nunca como HTML (no hay inyección de código en OBS).
+- Límite de 10 intentos de login cada 15 min por IP, anti-spam de 1.5 s entre mensajes y máximo 200 caracteres (configurable en `.env`).
+- Las sesiones viven en memoria: si reinicias el servidor, los compañeros vuelven a iniciar sesión.
+
+## Variables de entorno
+
+Ver `.env.example`: `PORT`, `OVERLAY_KEY`, `MAX_MESSAGE_LENGTH`, `COOLDOWN_MS`, `SESSION_TTL_HOURS`, `USERS_FILE`.

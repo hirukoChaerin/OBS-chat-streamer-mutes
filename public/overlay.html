@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Overlay chat</title>
+<!--
+  Fuente de navegador para OBS. Parámetros (?user=ana&size=30...):
+    user      usuario(s) a mostrar: "ana", "ana,luis" o "*" (todos). Default: *
+    key       OVERLAY_KEY si la configuraste en el servidor
+    duration  segundos que dura cada burbuja (0 = no desaparece). Default: 8
+    max       burbujas apiladas como máximo. Default: 3
+    size      tamaño de letra en px. Default: 28
+    width     ancho máximo de la burbuja en px. Default: 520
+    align     center | left | right (dónde apunta la colita). Default: center
+    name      1/0 mostrar el nombre en la burbuja. Default: 1
+    typing    1/0 mostrar "…" mientras escribe. Default: 1
+    bg / fg   color de fondo / texto en hex sin # (ej. bg=1a1a24&fg=ffffff)
+    demo      1 = muestra una burbuja fija para posicionar en OBS
+-->
+<style>
+  :root { --size: 28px; --bg: #ffffff; --fg: #14141c; --maxw: 520px; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+
+  #stack {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    padding: 0 14px 20px;
+  }
+  body.left  #stack { align-items: flex-start; }
+  body.right #stack { align-items: flex-end; }
+
+  .bubble {
+    --c: #7c5cff;
+    position: relative; max-width: var(--maxw);
+    background: var(--bg); color: var(--fg);
+    border: 3px solid var(--c); border-radius: 18px;
+    padding: .4em .75em .45em;
+    font-size: var(--size); font-weight: 600; line-height: 1.25;
+    overflow-wrap: anywhere; text-align: left;
+    box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    animation: pop .28s cubic-bezier(.2, 1.4, .4, 1) both;
+    transform-origin: bottom center;
+  }
+  body.left .bubble  { transform-origin: bottom left; }
+  body.right .bubble { transform-origin: bottom right; }
+
+  .bubble .name {
+    display: block; font-size: .5em; font-weight: 800; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--c); margin-bottom: .1em;
+  }
+
+  /* Colita apuntando al personaje: solo en la burbuja de más abajo */
+  .bubble:last-child::before, .bubble:last-child::after {
+    content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+    border-style: solid; border-color: transparent;
+  }
+  .bubble:last-child::before { bottom: -18px; border-width: 15px 13px 0; border-top-color: var(--c); }
+  .bubble:last-child::after  { bottom: -11px; border-width: 11px 9px 0;  border-top-color: var(--bg); }
+  body.left  .bubble:last-child::before { left: 28px; transform: none; }
+  body.left  .bubble:last-child::after  { left: 32px; transform: none; }
+  body.right .bubble:last-child::before { left: auto; right: 28px; transform: none; }
+  body.right .bubble:last-child::after  { left: auto; right: 32px; transform: none; }
+
+  .bubble.out { animation: fade .4s ease forwards; }
+
+  .typing .dots { display: inline-flex; gap: .2em; padding: .15em 0; }
+  .typing .dots i {
+    width: .4em; height: .4em; border-radius: 50%; background: var(--c);
+    animation: blink 1.2s infinite ease-in-out;
+  }
+  .typing .dots i:nth-child(2) { animation-delay: .2s; }
+  .typing .dots i:nth-child(3) { animation-delay: .4s; }
+
+  @keyframes pop   { from { opacity: 0; transform: scale(.6) translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes fade  { to { opacity: 0; transform: translateY(-8px); } }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-.15em); } }
+</style>
+</head>
+<body>
+<div id="stack"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const p = new URLSearchParams(location.search);
+  const num = (k, d) => { const v = parseFloat(p.get(k)); return Number.isFinite(v) ? v : d; };
+  const hex = (k) => { const v = p.get(k); return v && /^[0-9a-f]{3}([0-9a-f]{3})?([0-9a-f]{2})?$/i.test(v) ? '#' + v : null; };
+
+  const cfg = {
+    users: p.get('user') || p.get('users') || '*',
+    key: p.get('key') || '',
+    duration: num('duration', 8),
+    max: Math.max(1, num('max', 3)),
+    showName: p.get('name') !== '0',
+    typing: p.get('typing') !== '0',
+  };
+
+  const root = document.documentElement.style;
+  if (p.has('size'))  root.setProperty('--size', num('size', 28) + 'px');
+  if (p.has('width')) root.setProperty('--maxw', num('width', 520) + 'px');
+  if (hex('bg')) root.setProperty('--bg', hex('bg'));
+  if (hex('fg')) root.setProperty('--fg', hex('fg'));
+  if (['left', 'right'].includes(p.get('align'))) document.body.classList.add(p.get('align'));
+
+  const stack = document.getElementById('stack');
+  const typingEls = new Map(); // username -> elemento "…"
+
+  function makeBubble(m) {
+    const el = document.createElement('div');
+    el.className = 'bubble';
+    el.style.setProperty('--c', m.color);
+    if (cfg.showName) {
+      const n = document.createElement('span');
+      n.className = 'name';
+      n.textContent = m.displayName;
+      el.appendChild(n);
+    }
+    return el;
+  }
+
+  function dismiss(el) {
+    if (!el.isConnected || el.classList.contains('out')) return;
+    el.classList.add('out');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 700);
+  }
+
+  function addMessage(m) {
+    removeTyping(m.username);
+    const el = makeBubble(m);
+    el.appendChild(document.createTextNode(m.text)); // nunca se interpreta como HTML
+    // Los mensajes van encima de cualquier "…" pendiente
+    stack.insertBefore(el, stack.querySelector('.typing'));
+    if (cfg.duration > 0) setTimeout(() => dismiss(el), cfg.duration * 1000);
+
+    const visible = [...stack.querySelectorAll('.bubble:not(.typing):not(.out)')];
+    while (visible.length > cfg.max) dismiss(visible.shift());
+  }
+
+  function showTyping(m) {
+    if (typingEls.has(m.username)) return;
+    const el = makeBubble(m);
+    el.classList.add('typing');
+    el.insertAdjacentHTML('beforeend', '<span class="dots"><i></i><i></i><i></i></span>');
+    stack.appendChild(el);
+    typingEls.set(m.username, el);
+    // Seguro por si se pierde el evento de "dejó de escribir"
+    el._timer = setTimeout(() => removeTyping(m.username), 10000);
+  }
+
+  function removeTyping(username) {
+    const el = typingEls.get(username);
+    if (!el) return;
+    clearTimeout(el._timer);
+    typingEls.delete(username);
+    el.remove();
+  }
+
+  if (p.get('demo') === '1') {
+    const who = cfg.users === '*' ? 'demo' : cfg.users.split(',')[0];
+    cfg.duration = 0;
+    addMessage({ username: who, displayName: who, color: '#ff4d6d', text: 'Mensaje de prueba para acomodar la burbuja 🎯' });
+  }
+
+  const socket = io({ auth: { role: 'overlay', users: cfg.users, key: cfg.key } });
+  socket.on('connect', () => console.log('[overlay] conectado como', cfg.users));
+  socket.on('connect_error', (e) => console.error('[overlay]', e.message));
+  socket.on('message', addMessage);
+  socket.on('typing', (m) => {
+    if (!cfg.typing) return;
+    m.typing ? showTyping(m) : removeTyping(m.username);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    container_name: obs-chat
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      OVERLAY_KEY: ${OVERLAY_KEY:-}
+      MAX_MESSAGE_LENGTH: ${MAX_MESSAGE_LENGTH:-200}
+      COOLDOWN_MS: ${COOLDOWN_MS:-1500}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+    ports:
+      # Solo tu PC (OBS y cloudflared en el host) puede entrar; nadie de tu red local.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/app/data
+
+  # Opcional: correr el túnel también en Docker (túnel con nombre creado en el
+  # panel de Cloudflare Zero Trust, con el servicio apuntando a http://app:3000).
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+  #   depends_on: [app]

@@ -42,11 +42,72 @@ npm run add-user -- ana nuevaClave   # cambiar contraseña (mantiene nombre y co
 
 ## 2. Compartir con Cloudflare Tunnel
 
-Rápido (URL aleatoria `*.trycloudflare.com`, cambia en cada arranque):
+Hay dos tipos de túnel y dos formas de correrlos (Docker o instalado en tu PC):
+
+| | Quick Tunnel | Túnel con nombre |
+|---|---|---|
+| Cuenta / dominio | No hace falta | Cuenta gratis + un dominio en Cloudflare |
+| URL | Aleatoria `*.trycloudflare.com`, **cambia en cada reinicio** | Fija, ej. `chat.tudominio.com` |
+| Ideal para | Probar, o streams ocasionales | Uso de todos los días |
+
+Con cualquiera, la protección del overlay sigue funcionando: Cloudflare añade la cabecera `cf-connecting-ip`, así que nadie puede abrir el overlay a través del túnel.
+
+### Opción A: desde Docker (no instalas nada)
+
+Ya viene en el `docker-compose.yml`, con *profiles*: solo arranca el túnel que pidas.
+
+**Quick Tunnel:**
+```bash
+docker compose --profile quick up -d
+docker compose logs tunnel-quick | grep trycloudflare.com   # aquí sale tu URL
+```
+
+**Túnel con nombre:**
+1. En el panel de Cloudflare entra a **Zero Trust → Networks → Tunnels → Create a tunnel**, elige **Cloudflared** y ponle un nombre.
+2. En el paso de instalación, copia el **token** (la cadena larga después de `--token` en el comando que te muestra). Pégalo en `.env`:
+   ```
+   CF_TUNNEL_TOKEN=eyJhIjoi...
+   ```
+3. En **Public Hostname** elige subdominio y dominio, tipo **HTTP** y URL **`app:3000`** (el nombre del servicio dentro de Docker, no `localhost`).
+4. Arranca:
+   ```bash
+   docker compose --profile tunnel up -d
+   docker compose logs -f tunnel    # debe decir "Registered tunnel connection"
+   ```
+
+### Opción B: instalar cloudflared en tu PC
+
+| Sistema | Instalación |
+|---|---|
+| Windows | `winget install --id Cloudflare.cloudflared` (o el `.msi` de [GitHub releases](https://github.com/cloudflare/cloudflared/releases/latest)). En Windows **no se actualiza solo**: repite el comando con `winget upgrade` de vez en cuando. |
+| macOS | `brew install cloudflared` |
+| Debian / Ubuntu | ver abajo |
+
+```bash
+# Debian / Ubuntu (repositorio oficial)
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install cloudflared
+```
+
+Comprueba con `cloudflared --version`.
+
+**Quick Tunnel** (la URL aparece en la terminal):
 ```bash
 cloudflared tunnel --url http://localhost:3000
 ```
-Fijo (tu dominio): crea un túnel en Cloudflare Zero Trust → Networks → Tunnels, con el servicio `http://localhost:3000` (o `http://app:3000` si usas el servicio `tunnel` del `docker-compose.yml`). WebSockets funcionan sin configurar nada extra.
+
+**Túnel con nombre:** igual que en la opción A, pero en **Public Hostname** usa la URL **`localhost:3000`**, e instálalo como servicio para que arranque solo con tu PC:
+```bash
+cloudflared service install <TOKEN>
+```
+
+### Notas
+
+- Los Quick Tunnels no funcionan si existe un `config.yaml` en tu carpeta `.cloudflared`; renómbralo mientras los usas.
+- Los Quick Tunnels permiten hasta 200 peticiones simultáneas y no tienen garantía de disponibilidad. Para un grupo de compañeros sobra, pero si haces streams seguido, usa el túnel con nombre.
+- No uses a la vez el túnel de Docker y el de tu PC: elige uno.
 
 Pásale a cada compañero la URL del túnel + su usuario y contraseña.
 

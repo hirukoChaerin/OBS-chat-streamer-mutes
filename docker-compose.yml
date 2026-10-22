@@ -15,10 +15,30 @@ services:
     volumes:
       - ./data:/app/data
 
-  # Opcional: correr el túnel también en Docker (túnel con nombre creado en el
-  # panel de Cloudflare Zero Trust, con el servicio apuntando a http://app:3000).
-  # tunnel:
-  #   image: cloudflare/cloudflared:latest
-  #   restart: unless-stopped
-  #   command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
-  #   depends_on: [app]
+  # ---------------------------------------------------------------------------
+  # Túneles de Cloudflare (opcionales). Solo arrancan si activas su "profile".
+  # ---------------------------------------------------------------------------
+
+  # Quick Tunnel: sin cuenta, URL aleatoria *.trycloudflare.com (cambia en cada reinicio).
+  #   docker compose --profile quick up -d
+  #   docker compose logs tunnel-quick | grep trycloudflare.com
+  tunnel-quick:
+    image: cloudflare/cloudflared:latest
+    container_name: obs-chat-tunnel-quick
+    profiles: ["quick"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://app:3000
+    depends_on: [app]
+
+  # Túnel con nombre: URL fija en tu dominio. Necesita CF_TUNNEL_TOKEN en .env.
+  # En Cloudflare, el "Public Hostname" debe apuntar al servicio http://app:3000
+  #   docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: obs-chat-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+    depends_on: [app]

@@ -50,8 +50,6 @@ Hay dos tipos de túnel y dos formas de correrlos (Docker o instalado en tu PC):
 | URL | Aleatoria `*.trycloudflare.com`, **cambia en cada reinicio** | Fija, ej. `chat.tudominio.com` |
 | Ideal para | Probar, o streams ocasionales | Uso de todos los días |
 
-Con cualquiera, la protección del overlay sigue funcionando: Cloudflare añade la cabecera `cf-connecting-ip`, así que nadie puede abrir el overlay a través del túnel.
-
 ### Opción A: desde Docker (no instalas nada)
 
 Ya viene en el `docker-compose.yml`, con *profiles*: solo arranca el túnel que pidas.
@@ -147,10 +145,11 @@ Ejemplo estilo oscuro, una sola burbuja que se queda:
 
 ## 4. Seguridad
 
-- **Overlay protegido por defecto:** sin `OVERLAY_KEY`, el overlay solo funciona desde tu PC; quien entre por el túnel no puede conectarse a él (se detecta por la cabecera `cf-connecting-ip` que añade Cloudflare). Si necesitas abrirlo desde otro equipo, define `OVERLAY_KEY` y añade `&key=...` a la URL.
+- **Overlay protegido por defecto:** sin `OVERLAY_KEY`, el overlay solo acepta conexiones hechas a `http://localhost:3000` sin cabeceras de reenvío. Las que llegan por el túnel traen el dominio público (`*.trycloudflare.com` o tu dominio) o cabeceras como `cf-connecting-ip` / `x-forwarded-for`, y se rechazan. Si necesitas abrir el overlay desde otro equipo, o quieres una garantía extra, define `OVERLAY_KEY` y añade `&key=...` a la URL. Igualmente, el overlay solo muestra lo que ya sale en el stream.
 - Nadie puede escribir a nombre de otro: el usuario sale de la sesión del servidor, no del navegador.
 - Los mensajes se insertan como texto, nunca como HTML (no hay inyección de código en OBS).
-- Límite de 10 intentos de login cada 15 min por IP, anti-spam de 1.5 s entre mensajes y máximo 200 caracteres (configurable en `.env`).
+- Límite de intentos de login cada 15 min: 10 por usuario y 30 por IP (la IP real la entrega Cloudflare en `cf-connecting-ip`).
+- Anti-spam de 1.5 s entre mensajes y máximo 200 caracteres (configurable en `.env`).
 - Las sesiones viven en memoria: si reinicias el servidor, los compañeros vuelven a iniciar sesión.
 
 ## Variables de entorno

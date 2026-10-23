@@ -26,7 +26,7 @@ const HISTORY_SIZE = 50;
 
 // ---------- Estado en memoria ----------
 const sessions = new Map(); // token -> { username, expires }
-const loginAttempts = new Map(); // ip -> { count, reset }
+const loginAttempts = new Map(); // "ip:<ip>" | "user:<usuario>" -> { count, reset }
 const lastMsgAt = new Map(); // username -> timestamp
 const history = [];
 let users = {};
@@ -39,7 +39,13 @@ app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e4 });
+const io = new Server(server, {
+  maxHttpBufferSize: 1e4,
+  // Ping cada 10 s: detecta antes las conexiones caídas y, si algo en el camino bloquea
+  // WebSocket y Socket.IO cae a long-polling, ninguna petición queda abierta más de ~10 s.
+  pingInterval: 10000,
+  pingTimeout: 20000,
+});
 
 // ---------- Usuarios ----------
 function loadUsers() {
@@ -97,36 +103,57 @@ setInterval(() => {
   for (const [ip, a] of loginAttempts) if (a.reset < now) loginAttempts.delete(ip);
 }, 10 * 60 * 1000).unref();
 
-// Cloudflare Tunnel siempre añade cf-connecting-ip con la IP real del visitante
+// IP del visitante. Cloudflare Tunnel pone cf-connecting-ip (tiene prioridad).
+// El login también se limita por usuario (ver tooManyAttempts), así que un atacante
+// que reparta intentos entre muchas IP sigue frenado.
 function clientIp(req) {
-  return req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return req.headers['cf-connecting-ip'] || fwd || req.socket.remoteAddress;
 }
 
-function tooManyAttempts(ip) {
+// ¿La petición viene directo de esta PC (OBS) y no de un túnel?
+// El túnel manda el Host público (xxx.trycloudflare.com o tu dominio)
+// y/o cabeceras de reenvío. OBS siempre usa http://localhost:3000.
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const FORWARD_HEADERS = ['cf-connecting-ip', 'x-forwarded-for', 'x-real-ip', 'forwarded'];
+function isLocalRequest(headers) {
+  if (FORWARD_HEADERS.some((h) => headers[h])) return false;
+  const host = String(headers.host || '').toLowerCase();
+  const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0];
+  return LOCAL_HOSTS.has(hostname);
+}
+
+// Límite de intentos: 10 por usuario y 30 por IP cada 15 minutos.
+function hit(key, limit) {
   const now = Date.now();
-  let a = loginAttempts.get(ip);
+  let a = loginAttempts.get(key);
   if (!a || a.reset < now) {
     a = { count: 0, reset: now + 15 * 60 * 1000 };
-    loginAttempts.set(ip, a);
+    loginAttempts.set(key, a);
   }
   a.count++;
-  return a.count > 10;
+  return a.count > limit;
+}
+function tooManyAttempts(ip, username) {
+  const byIp = hit(`ip:${ip}`, 30);
+  const byUser = username ? hit(`user:${username}`, 10) : false;
+  return byIp || byUser;
 }
 
 // ---------- API ----------
 app.post('/api/login', async (req, res) => {
   const ip = clientIp(req);
-  if (tooManyAttempts(ip)) {
+  const { username, password } = req.body || {};
+  const u = typeof username === 'string' ? username.trim().toLowerCase().slice(0, 64) : '';
+  if (tooManyAttempts(ip, u)) {
     return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos.' });
   }
-  const { username, password } = req.body || {};
-  const u = typeof username === 'string' ? username.trim().toLowerCase() : '';
-  const user = users[u];
+  const user = Object.hasOwn(users, u) ? users[u] : null;
   // Se verifica contra un hash falso si el usuario no existe, para no revelar qué usuarios existen
   const ok = await verifyPassword(String(password ?? ''), user ? user.password : DUMMY_HASH);
   if (!user || !ok) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
 
-  loginAttempts.delete(ip);
+  loginAttempts.delete(`user:${u}`);
   res.json({ token: createSession(u), user: publicUser(u), maxLength: MAX_LEN });
 });
 
@@ -147,7 +174,7 @@ app.use((err, req, res, _next) => {
 
 // ---------- Socket.IO ----------
 function isExternal(socket) {
-  return Boolean(socket.handshake.headers['cf-connecting-ip']);
+  return !isLocalRequest(socket.handshake.headers);
 }
 
 function onlineUsers() {

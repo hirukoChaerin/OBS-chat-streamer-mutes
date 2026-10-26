@@ -16,7 +16,7 @@ const { hashPassword, verifyPassword } = require('./lib/auth');
 }
 
 // ---------- Config ----------
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3100;
 const OVERLAY_KEY = process.env.OVERLAY_KEY || '';
 const USERS_FILE = process.env.USERS_FILE || path.join(__dirname, 'data', 'users.json');
 const MAX_LEN = Number(process.env.MAX_MESSAGE_LENGTH) || 200;

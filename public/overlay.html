@@ -15,7 +15,10 @@
     name      1/0 mostrar el nombre en la burbuja. Default: 1
     typing    1/0 mostrar "…" mientras escribe. Default: 1
     bg / fg   color de fondo / texto en hex sin # (ej. bg=1a1a24&fg=ffffff)
-    demo      1 = muestra una burbuja fija para posicionar en OBS
+    sound     1 = suena el sonido de cada persona (default) · 0 = sin sonido
+              o fuerza uno para este overlay: pop, ding, blip, chime, bubble, boop, knock, sparkle, ana.mp3
+    volume    volumen del sonido de 0 a 100. Default: 60
+    demo      1 = muestra una burbuja fija para posicionar en OBS (y suena una vez; clic = repetir)
 -->
 <style>
   :root { --size: 28px; --bg: #ffffff; --fg: #14141c; --maxw: 520px; }
@@ -81,6 +84,7 @@
 <div id="stack"></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/sounds.js"></script>
 <script>
   const p = new URLSearchParams(location.search);
   const num = (k, d) => { const v = parseFloat(p.get(k)); return Number.isFinite(v) ? v : d; };
@@ -93,7 +97,17 @@
     max: Math.max(1, num('max', 3)),
     showName: p.get('name') !== '0',
     typing: p.get('typing') !== '0',
+    sound: (p.get('sound') || '1').trim(),
+    volume: Math.min(100, Math.max(0, num('volume', 60))) / 100,
   };
+
+  // sound=0 apaga; sound=1 usa el de cada persona; cualquier otro valor lo fuerza
+  const soundOff = ['0', 'off', 'no', 'false'].includes(cfg.sound.toLowerCase());
+  const soundForced = soundOff || ['1', 'on', 'si', 'sí', 'true'].includes(cfg.sound.toLowerCase()) ? null : cfg.sound;
+  function playFor(m) {
+    if (soundOff || cfg.volume === 0) return;
+    ChatSounds.play(soundForced || m.sound, cfg.volume);
+  }
 
   const root = document.documentElement.style;
   if (p.has('size'))  root.setProperty('--size', num('size', 28) + 'px');
@@ -156,16 +170,24 @@
     el.remove();
   }
 
-  if (p.get('demo') === '1') {
-    const who = cfg.users === '*' ? 'demo' : cfg.users.split(',')[0];
+  // Burbuja de prueba: usa el color y el sonido reales del personaje si el servidor los conoce
+  const demo = p.get('demo') === '1';
+  let demoMsg = null;
+  function showDemo(info) {
+    if (!demo || demoMsg) return;
+    const who = cfg.users === '*' ? 'demo' : cfg.users.split(',')[0].trim();
+    demoMsg = { username: who, displayName: who, color: '#ff4d6d', ...(info || {}), text: 'Mensaje de prueba para acomodar la burbuja 🎯' };
     cfg.duration = 0;
-    addMessage({ username: who, displayName: who, color: '#ff4d6d', text: 'Mensaje de prueba para acomodar la burbuja 🎯' });
+    addMessage(demoMsg);
+    playFor(demoMsg);
+    window.addEventListener('click', () => playFor(demoMsg));
   }
 
   const socket = io({ auth: { role: 'overlay', users: cfg.users, key: cfg.key } });
   socket.on('connect', () => console.log('[overlay] conectado como', cfg.users));
-  socket.on('connect_error', (e) => console.error('[overlay]', e.message));
-  socket.on('message', addMessage);
+  socket.on('connect_error', (e) => { console.error('[overlay]', e.message); showDemo(); });
+  socket.on('init', (d) => showDemo(d.users && d.users[0]));
+  socket.on('message', (m) => { addMessage(m); playFor(m); });
   socket.on('typing', (m) => {
     if (!cfg.typing) return;
     m.typing ? showTyping(m) : removeTyping(m.username);

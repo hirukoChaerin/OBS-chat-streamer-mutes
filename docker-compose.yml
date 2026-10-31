@@ -14,6 +14,8 @@ services:
       - "127.0.0.1:3100:3100"
     volumes:
       - ./data:/app/data
+      # Sonidos propios (mp3/ogg/wav): cópialos aquí, sin reconstruir la imagen
+      - ./public/sounds:/app/public/sounds:ro
 
   # ---------------------------------------------------------------------------
   # Túneles de Cloudflare (opcionales). Solo arrancan si activas su "profile".

@@ -34,6 +34,9 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); flex: none; }
   .dot.off { background: var(--danger); }
   .link { background: none; color: var(--muted); padding: 6px 8px; font-weight: 400; font-size: 14px; }
+  #soundBtn { font-size: 18px; line-height: 1; padding: 6px; border-radius: 8px; }
+  #soundBtn:hover, .link:hover { background: var(--panel); }
+  #soundBtn[aria-pressed="false"] { opacity: .6; }
   #online { padding: 8px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .chip { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--c); color: var(--c); font-weight: 600; }
   #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -67,6 +70,7 @@
 <section id="chat" class="hidden">
   <header>
     <div class="me"><span class="dot" id="connDot"></span><span id="me"></span></div>
+    <button class="link" id="soundBtn" type="button" aria-pressed="true">🔔</button>
     <button class="link" id="logoutBtn" type="button">Salir</button>
   </header>
   <div id="online"></div>
@@ -79,6 +83,7 @@
 </section>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/sounds.js"></script>
 <script>
   const $ = (s) => document.querySelector(s);
   let socket = null;
@@ -175,9 +180,31 @@
       showChat();
       $('#text').focus();
     });
-    socket.on('message', addMessage);
+    socket.on('message', (m) => {
+      addMessage(m);
+      // Suena con el sonido de quien escribió (los tuyos no, ya sabes que los enviaste)
+      if (soundOn && me && m.username !== me.username) ChatSounds.play(m.sound, CHAT_VOLUME);
+    });
     socket.on('presence', renderOnline);
   }
+
+  // ---------- Sonido (preferencia de cada compañero, guardada en su navegador) ----------
+  const CHAT_VOLUME = 0.5;
+  let soundOn = (() => { try { return localStorage.getItem('chatSound') !== '0'; } catch { return true; } })();
+  function renderSoundBtn() {
+    const b = $('#soundBtn');
+    b.textContent = soundOn ? '🔔' : '🔕';
+    b.setAttribute('aria-pressed', String(soundOn));
+    b.title = soundOn ? 'Sonido activado (clic para silenciar)' : 'Sonido desactivado (clic para activar)';
+    b.setAttribute('aria-label', b.title);
+  }
+  $('#soundBtn').addEventListener('click', () => {
+    soundOn = !soundOn;
+    try { localStorage.setItem('chatSound', soundOn ? '1' : '0'); } catch {}
+    renderSoundBtn();
+    if (soundOn && me) ChatSounds.play(me.sound, CHAT_VOLUME); // muestra cómo suena
+  });
+  renderSoundBtn();
 
   // ---------- UI ----------
   function addMessage(m) {

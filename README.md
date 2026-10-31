@@ -37,7 +37,8 @@ Los usuarios se guardan en `./data/users.json` (contraseñas con hash scrypt). E
 ```bash
 npm run add-user -- --list
 npm run add-user -- --remove ana     # le cierra la sesión al instante
-npm run add-user -- ana nuevaClave   # cambiar contraseña (mantiene nombre y color)
+npm run add-user -- ana nuevaClave   # cambiar contraseña (mantiene nombre, color y sonido)
+npm run add-user -- --sound ana ding # cambiar su sonido (ver sección 4)
 ```
 
 ## 2. Compartir con Cloudflare Tunnel
@@ -66,7 +67,7 @@ docker compose logs tunnel-quick | grep trycloudflare.com   # aquí sale tu URL
    ```
    CF_TUNNEL_TOKEN=eyJhIjoi...
    ```
-3. En **Public Hostname** elige subdominio y dominio, tipo **HTTP** y URL **`app:3000`** (el nombre del servicio dentro de Docker, no `localhost`).
+3. En **Public Hostname** elige subdominio y dominio, tipo **HTTP** y URL **`app:3100`** (el nombre del servicio dentro de Docker, no `localhost`).
 4. Arranca:
    ```bash
    docker compose --profile tunnel up -d
@@ -96,7 +97,7 @@ Comprueba con `cloudflared --version`.
 cloudflared tunnel --url http://localhost:3100
 ```
 
-**Túnel con nombre:** igual que en la opción A, pero en **Public Hostname** usa la URL **`localhost:3000`**, e instálalo como servicio para que arranque solo con tu PC:
+**Túnel con nombre:** igual que en la opción A, pero en **Public Hostname** usa la URL **`localhost:3100`**, e instálalo como servicio para que arranque solo con tu PC:
 ```bash
 cloudflared service install <TOKEN>
 ```
@@ -119,7 +120,8 @@ Por **cada personaje**:
    - Ancho `600`, Alto `400` (ajusta a tu escena)
    - Deja el CSS personalizado que trae OBS por defecto (fondo transparente).
    - Marca **"Actualizar navegador cuando la escena se active"**.
-3. Para acomodarla, usa temporalmente `...&demo=1`: muestra una burbuja fija. Muévela hasta que la colita apunte a la cabeza del personaje y luego quita `&demo=1`.
+   - Marca **"Controlar audio mediante OBS"** para que el sonido del mensaje salga en el stream (ver sección 4).
+3. Para acomodarla, usa temporalmente `...&demo=1`: muestra una burbuja fija con el color del personaje y suena una vez con su sonido (para repetirlo: clic derecho en la fuente → **Interactuar** y haz clic en la ventana). Muévela hasta que la colita apunte a la cabeza del personaje y luego quita `&demo=1`.
 4. Selecciona imagen + fuente de navegador → clic derecho → **Agrupar**, así se mueven juntos.
 
 La burbuja crece **hacia arriba** desde el borde inferior de la fuente, así que el borde inferior de la fuente debe quedar justo sobre la cabeza.
@@ -137,15 +139,42 @@ La burbuja crece **hacia arriba** desde el borde inferior de la fuente, así que
 | `name` | `1` | `0` oculta el nombre dentro de la burbuja |
 | `typing` | `1` | `0` oculta los "…" mientras el compañero escribe |
 | `bg`, `fg` | `ffffff`, `14141c` | Color de fondo / texto en hex sin `#` |
+| `sound` | `1` | `1` = suena el sonido de cada persona · `0` = sin sonido · o un nombre (`ding`, `ana.mp3`) para forzar ese sonido en este overlay |
+| `volume` | `60` | Volumen del sonido, de `0` a `100` |
 | `key` | — | Necesario solo si configuraste `OVERLAY_KEY` |
-| `demo` | — | `1` = burbuja fija de prueba |
+| `demo` | — | `1` = burbuja fija de prueba (suena una vez) |
 
 Ejemplo estilo oscuro, una sola burbuja que se queda: 
-`http://localhost:3000/overlay?user=luis&max=1&duration=0&bg=1a1a24&fg=ffffff&size=32`
+`http://localhost:3100/overlay?user=luis&max=1&duration=0&bg=1a1a24&fg=ffffff&size=32`
 
-## 4. Seguridad
+## 4. Sonidos
 
-- **Overlay protegido por defecto:** sin `OVERLAY_KEY`, el overlay solo acepta conexiones hechas a `http://localhost:3000` sin cabeceras de reenvío. Las que llegan por el túnel traen el dominio público (`*.trycloudflare.com` o tu dominio) o cabeceras como `cf-connecting-ip` / `x-forwarded-for`, y se rechazan. Si necesitas abrir el overlay desde otro equipo, o quieres una garantía extra, define `OVERLAY_KEY` y añade `&key=...` a la URL. Igualmente, el overlay solo muestra lo que ya sale en el stream.
+Cada vez que un compañero envía un mensaje, su overlay hace **su propio sonido**, así se distingue quién habló aunque no estés mirando la pantalla.
+
+**Elegir el sonido de cada persona.** Al crear un usuario se le asigna uno que nadie más use. Para escucharlos todos, abre `http://localhost:3100/sonidos`. Para cambiarlo:
+```bash
+npm run add-user -- --sound ana ding
+```
+Sonidos incluidos: `pop`, `ding`, `blip`, `chime`, `bubble`, `boop`, `knock`, `sparkle`. Se generan en el navegador, no hay que descargar nada.
+
+**Sonidos propios.** Copia un `.mp3`, `.ogg` o `.wav` a `public/sounds/` (por ejemplo `ana.mp3`) y asígnalo con `npm run add-user -- --sound ana ana.mp3`. Con Docker, esa carpeta está montada: no hace falta reconstruir. Si el archivo no existe, suena `pop`.
+
+**Activar o desactivar el audio:**
+
+| Dónde | Cómo |
+|---|---|
+| Un overlay, de forma fija | `&sound=0` en su URL (o `&volume=30` para bajarlo) |
+| En vivo, durante el stream | Con **"Controlar audio mediante OBS"** marcado, la fuente aparece en el **Mezclador de audio**: silénciala o baja el volumen ahí, sin tocar la URL |
+| Un compañero, en su chat | Botón 🔔/🔕 junto a "Salir". Suenan los mensajes de los demás, no los propios. Cada uno decide y su navegador lo recuerda |
+
+**Tenlo en cuenta:**
+- Sin **"Controlar audio mediante OBS"**, el sonido sale por los altavoces de Windows: lo oyes tú, pero solo llega al stream si capturas el audio del escritorio, y no aparece en el mezclador.
+- El sonido suena en cada overlay que muestre el mensaje. Si además de un overlay por personaje tienes uno con `user=*`, ponle `&sound=0` a ese para que no suene doble.
+- Si abres el overlay en Chrome o Edge para probarlo, haz clic una vez en la página: los navegadores bloquean el audio hasta que interactúas. En OBS suena directamente.
+
+## 5. Seguridad
+
+- **Overlay protegido por defecto:** sin `OVERLAY_KEY`, el overlay solo acepta conexiones hechas a `http://localhost:3100` sin cabeceras de reenvío. Las que llegan por el túnel traen el dominio público (`*.trycloudflare.com` o tu dominio) o cabeceras como `cf-connecting-ip` / `x-forwarded-for`, y se rechazan. Si necesitas abrir el overlay desde otro equipo, o quieres una garantía extra, define `OVERLAY_KEY` y añade `&key=...` a la URL. Igualmente, el overlay solo muestra lo que ya sale en el stream.
 - Nadie puede escribir a nombre de otro: el usuario sale de la sesión del servidor, no del navegador.
 - Los mensajes se insertan como texto, nunca como HTML (no hay inyección de código en OBS).
 - Límite de intentos de login cada 15 min: 10 por usuario y 30 por IP (la IP real la entrega Cloudflare en `cf-connecting-ip`).

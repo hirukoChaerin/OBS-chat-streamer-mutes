@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { hashPassword, verifyPassword } = require('./lib/auth');
+const { isValidSound, defaultSound } = require('./lib/sounds');
 
 // ---------- Versión mínima de Node (parche de seguridad 24.22.1) ----------
 {
@@ -76,6 +77,7 @@ function publicUser(username) {
     username,
     displayName: u.displayName || username,
     color: u.color || '#7c5cff',
+    sound: isValidSound(u.sound) ? u.sound : defaultSound(username),
   };
 }
 
@@ -220,8 +222,12 @@ io.on('connection', (socket) => {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    if (list.length === 0 || list.includes('*')) socket.join('overlay:*');
+    const all = list.length === 0 || list.includes('*');
+    if (all) socket.join('overlay:*');
     else list.forEach((u) => socket.join(`overlay:${u}`));
+    // Datos de los personajes de este overlay (para la burbuja de prueba con su color y sonido)
+    const shown = all ? Object.keys(users) : list.filter((u) => Object.hasOwn(users, u));
+    socket.emit('init', { users: shown.map(publicUser) });
     return;
   }
 

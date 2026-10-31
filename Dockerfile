@@ -15,5 +15,5 @@ COPY . .
 # Comprueba al construir que la imagen no trae un Node vulnerable
 RUN node -e "const [a,b,c]=process.versions.node.split('.').map(Number); if(a<24||(a===24&&(b<22||(b===22&&c<1)))){console.error('Node '+process.version+' < 24.22.1');process.exit(1)}"
 
-EXPOSE 3000
+EXPOSE 3100
 CMD ["node", "server.js"]

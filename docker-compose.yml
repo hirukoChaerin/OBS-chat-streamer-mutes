@@ -4,14 +4,14 @@ services:
     container_name: obs-chat
     restart: unless-stopped
     environment:
-      PORT: 3000
+      PORT: 3100
       OVERLAY_KEY: ${OVERLAY_KEY:-}
       MAX_MESSAGE_LENGTH: ${MAX_MESSAGE_LENGTH:-200}
       COOLDOWN_MS: ${COOLDOWN_MS:-1500}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
     ports:
       # Solo tu PC (OBS y cloudflared en el host) puede entrar; nadie de tu red local.
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3100:3100"
     volumes:
       - ./data:/app/data
 
@@ -27,11 +27,11 @@ services:
     container_name: obs-chat-tunnel-quick
     profiles: ["quick"]
     restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://app:3000
+    command: tunnel --no-autoupdate --url http://app:3100
     depends_on: [app]
 
   # Túnel con nombre: URL fija en tu dominio. Necesita CF_TUNNEL_TOKEN en .env.
-  # En Cloudflare, el "Public Hostname" debe apuntar al servicio http://app:3000
+  # En Cloudflare, el "Public Hostname" debe apuntar al servicio http://app:3100
   #   docker compose --profile tunnel up -d
   tunnel:
     image: cloudflare/cloudflared:latest

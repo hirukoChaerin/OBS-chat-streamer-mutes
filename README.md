@@ -3,7 +3,7 @@
 Cada compañero entra con su usuario y contraseña desde el celular o PC, escribe, y su mensaje aparece como burbuja **encima de su personaje** en OBS. Cada personaje tiene su propio overlay, así que los mensajes nunca se mezclan.
 
 ```
-Compañero (navegador) ──► Cloudflare Tunnel ──► tu PC :3000 ──► OBS (Fuente de navegador por personaje)
+Compañero (navegador) ──► Cloudflare Tunnel ──► tu PC :3100 ──► OBS (Fuente de navegador por personaje)
 ```
 
 ## 1. Arrancar
@@ -93,7 +93,7 @@ Comprueba con `cloudflared --version`.
 
 **Quick Tunnel** (la URL aparece en la terminal):
 ```bash
-cloudflared tunnel --url http://localhost:3000
+cloudflared tunnel --url http://localhost:3100
 ```
 
 **Túnel con nombre:** igual que en la opción A, pero en **Public Hostname** usa la URL **`localhost:3000`**, e instálalo como servicio para que arranque solo con tu PC:
@@ -115,7 +115,7 @@ Por **cada personaje**:
 
 1. Agrega la imagen del personaje.
 2. Agrega una **Fuente → Navegador** encima de la imagen:
-   - URL: `http://localhost:3000/overlay?user=ana`
+   - URL: `http://localhost:3100/overlay?user=ana`
    - Ancho `600`, Alto `400` (ajusta a tu escena)
    - Deja el CSS personalizado que trae OBS por defecto (fondo transparente).
    - Marca **"Actualizar navegador cuando la escena se active"**.
@@ -154,4 +154,4 @@ Ejemplo estilo oscuro, una sola burbuja que se queda:
 
 ## Variables de entorno
 
-Ver `.env.example`: `PORT`, `OVERLAY_KEY`, `MAX_MESSAGE_LENGTH`, `COOLDOWN_MS`, `SESSION_TTL_HOURS`, `USERS_FILE`.
+Ver `.env.example`: `PORT` (default `3100`), `OVERLAY_KEY`, `MAX_MESSAGE_LENGTH`, `COOLDOWN_MS`, `SESSION_TTL_HOURS`, `USERS_FILE`.

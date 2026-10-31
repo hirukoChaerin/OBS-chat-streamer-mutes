@@ -113,7 +113,7 @@ function clientIp(req) {
 
 // ¿La petición viene directo de esta PC (OBS) y no de un túnel?
 // El túnel manda el Host público (xxx.trycloudflare.com o tu dominio)
-// y/o cabeceras de reenvío. OBS siempre usa http://localhost:3000.
+// y/o cabeceras de reenvío. OBS siempre usa http://localhost:3100.
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const FORWARD_HEADERS = ['cf-connecting-ip', 'x-forwarded-for', 'x-real-ip', 'forwarded'];
 function isLocalRequest(headers) {
